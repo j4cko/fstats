@@ -18,7 +18,9 @@ How to build
 use your favorite fortran compiler, e.g. gfortran (>4.6 or something like that)
 
 gfortran -c fstats_mod.f90
+
 gfortran -c fstats.f90
+
 gfortran fstats_mod.o fstats.o -o fstats
 
 How to use
