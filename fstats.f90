@@ -24,34 +24,58 @@ program fstats
     use fstats_mod
     implicit none
 
-    integer :: readunit = 5
+    integer :: readunit = 56
     real :: summed=0.0, tmp,testarr(100)
-    integer :: stat, i ,j
+    integer :: stat, i
+    logical :: fexists
+    character(3) :: fcanread
+    character(240) :: fname
 
-   ! do
-   !     read(readunit,*,iostat=stat) tmp
-   !     if(stat /= 0) then
-   !         exit
-   !     end if
-   !     call add_real(tmp)
-   ! end do
-    do i=0,9
-        do j=1,100
-            testarr(j)=real(i*100+j)
-        end do
-        call fstats_add(testarr)
-    end do
-    call fstats_add(19203.234)
     
-    write(*,*) "mean:        ", mean()
-    write(*,*) "naive error: ", se_naive()
-    !write(*,*) "tau_int:     ", tau_int()
-    !write(*,*) "se(binning): ", se_binning(i)
-    !write(*,*) "        (after ", i, " steps, i.e. binsize=", 2**i, ")"
+    if(command_argument_count() < 1) then
+        !read from pipe / stdin
+        readunit = 5
+    else
+        !first argument is filename:
+        call get_command_argument(1, fname)
+        !check if file exists, readable, ...
+        inquire(file=fname, exist=fexists)
+        if(.not.fexists) then
+            write(0, *) "File ", trim(adjustl(fname)), " does not exist."
+            stop
+        end if
+        !open file:
+        open(file=fname, unit=readunit, status='old', iostat=stat)
+        inquire(file=fname, read=fcanread)
+        if(fcanread /= 'YES') then
+            write(0, *) "File ", trim(adjustl(fname)), " cannot be read."
+            stop
+        end if
+        if(stat /= 0) then
+            write(0, *) "File ", trim(adjustl(fname)), " cannot be opened for reading"
+            stop
+        end if
+    end if
+
+    !read in:
+    do
+        read(readunit,*,iostat=stat) tmp
+        call fstats_add(tmp)
+        if(stat /= 0) then
+            exit
+        end if
+    end do
+    if(readunit /= 5) then
+        close(readunit)
+    end if
+    write(*,*) "mean:        ", fstats_mean()
+    write(*,*) "naive error: ", fstats_error()
+    write(*,*) "tau_int:     ", fstats_tau_int()
+    write(*,*) "se(binning): ", fstats_error(ERROR_NAIVE, .true.)
 
     write(*,*) "binned bootstrap"
     do i=1,20
-        write(*,*) i, error_binning(i,.false.,ERROR_BOOTSTRAP)
+        write(*,*) i, fstats_error(ERROR_BOOTSTRAP, .true.)
     end do
     call fstats_free
 end program

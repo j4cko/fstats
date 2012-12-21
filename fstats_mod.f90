@@ -23,6 +23,7 @@
 
 module fstats_mod
     implicit none
+    private
     integer, parameter :: allocsize=1000 !allocate allocsize reals at once
     real, allocatable:: alldata(:), temp(:)
     integer :: npts = 0
@@ -37,6 +38,8 @@ module fstats_mod
         module procedure add_real
         module procedure add_realarray
     end interface 
+    public :: fstats_add, fstats_free, & 
+        & fstats_mean, fstats_rho, fstats_acf, fstats_error, fstats_tau_int
 
     contains
         !! add values to container
@@ -101,8 +104,8 @@ module fstats_mod
         end subroutine
 
         !!simple arithmetic mean of saved data
-        function mean()
-            real :: sum=0.0, mean
+        function fstats_mean()
+            real :: sum=0.0, fstats_mean
             integer :: i
             !calculate only if not cached
             if(.not. m_is_cached) then
@@ -112,24 +115,9 @@ module fstats_mod
                 mean_cached = sum / real(npts)
                 m_is_cached = .true.
             end if
-            mean = mean_cached
+            fstats_mean = mean_cached
         end function
 
-        !! sample variance := 1/(N-1) * sum(x - xbar)^2
-        function var()
-            real :: dat2 = 0.0, var, m
-            integer :: i
-            m = mean()
-            do i=1,npts
-                dat2 = dat2 + (alldata(i)-m)**2
-            end do
-            var = dat2/real(npts-1)
-        end function
-        !! stderror := sqrt(var/N)
-        function se_naive()
-            real :: se_naive
-            se_naive = sqrt(var()/real(npts))
-        end function
 
         !!all autocorrelation things here:
         !! rho0 = R(tau=0)
@@ -138,7 +126,7 @@ module fstats_mod
             integer :: t
             if(.not. rho0_is_cached) then
                 rho0_cached = 0.0
-                m = mean()
+                m = fstats_mean()
                 do t=1,npts
                     rho0_cached = rho0_cached + (alldata(t)-m)**2
                 end do
@@ -147,18 +135,34 @@ module fstats_mod
             end if
             rho0 = rho0_cached
         end function
-        !! rho(tau) := R(tau)/R(0)
-        function rho(tau)
+        !! autocorrelation function rho(tau) := R(tau)/R(0)
+        function fstats_rho(tau)
             integer, intent(in) :: tau
             integer :: nmax, i, t
-            real :: rho, m
-            rho = 0.0
-            m = mean()
+            real :: fstats_rho, m
+            fstats_rho = 0.0
+            m = fstats_mean()
             do t=1,npts-tau
-                rho = rho + (alldata(t)-m)*(alldata(t+tau)-m)
+                fstats_rho = fstats_rho + (alldata(t)-m)*(alldata(t+tau)-m)
             end do
-            rho = rho / (real(npts-tau)*rho0())
+            fstats_rho = fstats_rho / (real(npts-tau)*rho0())
         end function
+        !! complete autocorrelation function
+        function fstats_acf(maxlength)
+            real,allocatable :: fstats_acf(:)
+            integer, optional :: maxlength
+            integer :: maxlength_, i
+            if(present(maxlength).and.maxlength <= npts) then
+                maxlength_ = maxlength
+            else
+                maxlength_ = int(log(real(npts)))
+            end if
+            allocate(fstats_acf(maxlength_))
+            do i=1,maxlength_
+                fstats_acf(i) = fstats_rho(i)
+            end do
+        end function
+
         !! integrated auto correlation function, up to taumax
         function tau_int_max(taumax)
             integer, intent(in) :: taumax
@@ -166,12 +170,12 @@ module fstats_mod
             integer :: i
             tau_int_max = 0.5
             do i=1,taumax
-                tau_int_max = tau_int_max + rho(i)
+                tau_int_max = tau_int_max + fstats_rho(i)
             end do
         end function
         !! integrated auto corr fn, self-determined truncation of sum
-        function tau_int()
-            real :: tau_int, tau_int_old
+        function fstats_tau_int()
+            real :: fstats_tau_int, tau_int_old
             ! iteration stops, when tau_int
             ! doesn't change more than eps
             real, parameter :: eps = 0.01 
@@ -183,11 +187,11 @@ module fstats_mod
             tau_int_old = tau_int_max(start_tau)
             do i=1,maxiter
                 !rule of thumb: truncate sum after 4*tau_int
-                tau_int = tau_int_max(int(4*tau_int_old))
-                if(abs((tau_int_old - tau_int)/(tau_int_old + tau_int)) < eps) then
+                fstats_tau_int = tau_int_max(int(4*tau_int_old))
+                if(abs((tau_int_old - fstats_tau_int)/(tau_int_old + fstats_tau_int)) < eps) then
                     exit
                 end if
-                tau_int_old = tau_int
+                tau_int_old = fstats_tau_int
             end do
         end function
 
@@ -252,7 +256,7 @@ module fstats_mod
                     end if
                     allocate(bsdata(10*nbins))
                     !sample data:
-                    !rule of thumb: draw 3N samples, each of length N
+                    !draw 10*N samples, each of length N
                     do i=1,10*nbins
                         bsdata(i) = 0.0
                         do j=1,nbins
@@ -269,31 +273,80 @@ module fstats_mod
                         error_binning=error_binning + (bsdata(i)-bin_mean)**2
                     end do
                     error_binning = sqrt(error_binning / real(10*nbins-1))
-                    write(6,*) "mean=", sum(bsdata)/real(10*nbins)
                     deallocate(bsdata)
             end select
 
             deallocate(bins)
         end function
-        function error_binning_auto(iter)
+        function error_binning_auto(error_method, iter)
             !find maximal error by binning
             !stops, when change is less than eps
             !iter is intent(out)! returns number of iteration steps
             real :: error_binning_auto
             integer, optional,intent(out) :: iter
+            integer :: iter_
             integer, parameter :: startexp=1, maxsizeexp=10
+            integer, intent(in), optional :: error_method
             real, parameter :: eps = 0.1
             real :: oldse, newse, maxse
             integer isize
             oldse = error_binning(2**startexp)
             maxse = oldse
-            iter = 0
+            iter_ = 0
             do isize=startexp+1,maxsizeexp
-                iter = iter + 1
-                newse = error_binning(2**isize)
+                iter_ = iter_ + 1
+                newse = error_binning(2**isize, .false., error_method)
                 if(newse > maxse) maxse = newse
                 if(abs(oldse-newse)/(oldse+newse) < eps) exit
             end do
+            if(present(iter)) iter=iter_
             error_binning_auto = maxse
         end function
+        !! sample variance := 1/(N-1) * sum(x - xbar)^2
+        function var()
+            real :: dat2 = 0.0, var, m
+            integer :: i
+            m = fstats_mean()
+            do i=1,npts
+                dat2 = dat2 + (alldata(i)-m)**2
+            end do
+            var = dat2/real(npts-1)
+        end function
+        !! stderror := sqrt(var/N)
+        function get_error_naive()
+            real :: get_error_naive
+
+            get_error_naive = sqrt(var()/real(npts))
+        end function
+        function fstats_error(error_method, binned)
+            integer, intent(in), optional :: error_method
+            integer :: err_method_
+            logical, intent(in), optional :: binned
+            logical :: bin_
+            real :: fstats_error
+            if(present(error_method)) then
+                if(error_method /= ERROR_NAIVE .and. &
+                    & error_method /= ERROR_BOOTSTRAP) then
+                    write(0,*) "error: error_method must be " // &
+                        & "either ERROR_NAIVE or ERROR_BOOTSTRAP"
+                    fstats_error=0.0
+                    return
+                end if
+                err_method_ = error_method
+            else
+                err_method_ = ERROR_NAIVE
+            end if
+            if(present(binned)) then
+                bin_ = binned
+            else
+                bin_ = .false.
+            end if
+
+            if(bin_ .or. err_method_ == ERROR_BOOTSTRAP) then
+                fstats_error = error_binning_auto(error_method)
+            else
+                fstats_error = get_error_naive()
+            end if
+        end function
+
 end module
