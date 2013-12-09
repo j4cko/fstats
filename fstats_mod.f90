@@ -111,7 +111,6 @@ module fstats_mod
             sum = 0.0
             !calculate only if not cached
             if(.not. m_is_cached) then
-                write(*,*) "npts=", npts, "sum=", sum
                 do i=1,npts
                     sum = sum + alldata(i)
                 end do
