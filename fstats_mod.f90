@@ -98,6 +98,7 @@ module fstats_mod
 
         !!free memory (forget about data)
         subroutine fstats_free
+            npts = 0
             m_is_cached = .false.
             rho0_is_cached = .false.
             deallocate(alldata)
