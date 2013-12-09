@@ -106,10 +106,12 @@ module fstats_mod
 
         !!simple arithmetic mean of saved data
         function fstats_mean()
-            real :: sum=0.0, fstats_mean
+            real :: sum, fstats_mean
             integer :: i
+            sum = 0.0
             !calculate only if not cached
             if(.not. m_is_cached) then
+                write(*,*) "npts=", npts, "sum=", sum
                 do i=1,npts
                     sum = sum + alldata(i)
                 end do
@@ -305,8 +307,9 @@ module fstats_mod
         end function
         !! sample variance := 1/(N-1) * sum(x - xbar)^2
         function var()
-            real :: dat2 = 0.0, var, m
+            real :: dat2, var, m
             integer :: i
+            dat2 = 0.0
             m = fstats_mean()
             do i=1,npts
                 dat2 = dat2 + (alldata(i)-m)**2
